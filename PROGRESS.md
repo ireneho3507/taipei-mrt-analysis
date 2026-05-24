@@ -38,7 +38,9 @@
 | 4 | `app.py`（5 分頁 + 11 widget），AppTest 無例外 | ✅ 完成 |
 | 5 | `src/ai_insights.py` 接 Claude（claude-sonnet-4-6 + prompt caching），5 分頁傳真實摘要 | ✅ 完成（唯真實金鑰實測待 demo 前） |
 | 6 | `requirements.txt`/`-dev`、`.gitignore`、`.streamlit/`、`.github/workflows/ci.yml`、`README.md` | ✅ 完成 |
-| 7 | 推 GitHub + 部署 Streamlit Cloud（公開 URL） | ⬜ 待辦 |
+| 7 | 推 GitHub（✅ private repo + CI 綠燈）+ 部署 Streamlit Cloud（⬜） | 🔶 進行中 |
+
+> GitHub：`ireneho3507/taipei-mrt-analysis`（private），main 已推送，GitHub Actions CI 通過（17 測試）。剩 Streamlit Cloud 部署 + AI 金鑰。
 
 **測試現況：17 項 pytest 全過；app 已用 `streamlit.testing` AppTest 驗證互動無例外。**
 
