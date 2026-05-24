@@ -1,0 +1,26 @@
+# 機密：絕不提交（避免規則扣分）
+.env
+.streamlit/secrets.toml
+secrets.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# 虛擬環境
+.venv/
+venv/
+env/
+
+# 作業系統 / 編輯器
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# 中間產物
+*.html
+.playwright-mcp/

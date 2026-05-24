@@ -1,0 +1,8 @@
+# 可提交的設定（不含機密）。machine-specific 機密放 secrets.toml（已 gitignore）。
+[theme]
+primaryColor = "#06743a"
+base = "light"
+font = "sans serif"
+
+[server]
+headless = true
