@@ -38,9 +38,11 @@
 | 4 | `app.py`（5 分頁 + 11 widget），AppTest 無例外 | ✅ 完成 |
 | 5 | `src/ai_insights.py` 接 Claude（claude-sonnet-4-6 + prompt caching），5 分頁傳真實摘要 | ✅ 完成（唯真實金鑰實測待 demo 前） |
 | 6 | `requirements.txt`/`-dev`、`.gitignore`、`.streamlit/`、`.github/workflows/ci.yml`、`README.md` | ✅ 完成 |
-| 7 | 推 GitHub（✅ private repo + CI 綠燈）+ 部署 Streamlit Cloud（⬜） | 🔶 進行中 |
+| 7 | 推 GitHub（✅ public repo + CI 綠燈）+ 部署 Streamlit Cloud（✅ 上線） | ✅ 完成（剩 AI 金鑰 + Firefox 檢查 + 排練） |
 
-> GitHub：`ireneho3507/taipei-mrt-analysis`（private），main 已推送，GitHub Actions CI 通過（17 測試）。剩 Streamlit Cloud 部署 + AI 金鑰。
+> GitHub：`ireneho3507/taipei-mrt-analysis`（**public**），CI 通過（17 測試）。
+> 上線網址：**https://irene-taipei-mrt-analysis.streamlit.app/** （Playwright 無痕驗收：0 console errors、圖表/widget/中文正常）。
+> 剩：到 Streamlit Cloud Secrets 填 `ANTHROPIC_API_KEY` 啟用 AI（選用）、Firefox 開一次、報告前排練。
 
 **測試現況：17 項 pytest 全過；app 已用 `streamlit.testing` AppTest 驗證互動無例外。**
 
