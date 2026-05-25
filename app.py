@@ -24,6 +24,12 @@ def get_stations():
     return dl.load_stations()
 
 
+@st.cache_data
+def get_raw_csv(filename: str) -> bytes:
+    """讀取 data/ 原始 CSV 位元組（保留 UTF-8-BOM 編碼）供下載。"""
+    return (dl.DATA_DIR / filename).read_bytes()
+
+
 overview = get_overview()
 stations = get_stations()
 
@@ -49,6 +55,24 @@ def ai_panel(key, context_builder):
 
 st.title("🚇 臺北捷運運量分析")
 st.caption("資料來源：政府開放資料平台（data.gov.tw）／臺北大眾捷運股份有限公司")
+
+with st.expander("📥 下載原始開放資料（CSV）"):
+    st.caption("本站分析所用的兩份原始檔，皆為政府開放資料，歡迎下載核對。")
+    d1, d2 = st.columns(2)
+    d1.download_button(
+        "客運概況（月）CSV",
+        get_raw_csv(dl.OVERVIEW_FILE),
+        file_name=dl.OVERVIEW_FILE,
+        mime="text/csv",
+        key="dl_overview",
+    )
+    d2.download_button(
+        "各站進出站（年）CSV",
+        get_raw_csv(dl.STATIONS_FILE),
+        file_name=dl.STATIONS_FILE,
+        mime="text/csv",
+        key="dl_stations",
+    )
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs(
     ["📈 歷史趨勢", "🧩 運量結構", "🗓️ 季節與崩跌", "🏆 站點排行", "🌗 通勤潮汐"]
@@ -92,7 +116,9 @@ with tab2:
     st.plotly_chart(charts.line_type_chart(share, metric2, as_pct),
                     width="stretch")
     st.caption("中運量＝文湖線（膠輪），高運量＝其餘重運量路線。"
-               "文湖線人次佔比約 9.5%，但收入佔比較高（單價較貴）。")
+               "文湖線人次佔比約 9.5%，其**收入佔比高於人次佔比**（每人次票價較高），"
+               "但總量仍遠小於高運量。"
+               "※ 切換『營收』時 2005–2007 為空白：開放資料該三年未提供分車種收入。")
     def _ctx_m2():
         latest = share.iloc[-1]
         unit = "%" if as_pct else "（原始量）"
