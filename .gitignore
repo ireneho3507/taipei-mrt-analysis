@@ -24,3 +24,8 @@ Thumbs.db
 # 中間產物
 *.html
 .playwright-mcp/
+
+# 個人報告準備文件（不公開）
+docs/presentation_plan.md
+docs/demo_script.md
+docs/qa_prep.md
