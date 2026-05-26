@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """臺北捷運運量分析 — Streamlit 互動網站。
 
-五個分析分頁（M1 趨勢 / M2 運量結構 / M3 季節與崩跌 / M4 站點排行 / M5 通勤潮汐）
-＋ 跨頁 AI 解讀（claude-sonnet-4-6，階段 5 接上）。
+五個分析分頁（M1 趨勢 / M2 運量結構 / M3 季節與崩跌 / M4 站點排行 / M5 通勤潮汐）。
 資料來源：data.gov.tw → 臺北大眾捷運公司。
 """
 import streamlit as st
@@ -35,22 +34,6 @@ stations = get_stations()
 
 OV_YEARS = (int(overview["西元年"].min()), int(overview["西元年"].max()))
 ST_YEARS = (int(stations["西元年"].min()), int(stations["西元年"].max()))
-
-
-def ai_panel(key, context_builder):
-    """各分頁共用的 AI 解讀區（claude-sonnet-4-6）。"""
-    with st.expander("🤖 AI 解讀目前畫面"):
-        from src import ai_insights
-        if not ai_insights.is_configured():
-            st.info("尚未設定 ANTHROPIC_API_KEY；請於 `.streamlit/secrets.toml`"
-                    "（本機）或 Streamlit Cloud 的 Secrets 設定後即可使用。")
-            return
-        if st.button("產生解讀", key=f"ai_{key}"):
-            with st.spinner("Claude 解讀中…"):
-                try:
-                    st.write(ai_insights.interpret(context_builder()))
-                except Exception as e:  # noqa: BLE001 - 將錯誤友善呈現給使用者
-                    st.error(f"AI 解讀失敗：{e}")
 
 
 st.title("🚇 臺北捷運運量分析")
@@ -94,14 +77,6 @@ with tab1:
                     width="stretch")
     st.caption("提示：原始月資料含季節波動，建議搭配「12 個月移動平均」看長期趨勢；"
                "「客單價」＝收入÷人次，可看出票價政策影響。2026 為不完整年。")
-    def _ctx_m1():
-        s = trend["數值"].dropna()
-        first = f"{s.iloc[0]:,.1f}" if len(s) else "—"
-        last = f"{s.iloc[-1]:,.1f}" if len(s) else "—"
-        return (f"分析：歷史{metric}趨勢（{charts._SMOOTH_LABEL[smoothing]}）。"
-                f"年範圍 {yr[0]}–{yr[1]}。區間起始值 {first}、最新值 {last}。"
-                f"{'顯示了路網通車與疫情等事件標註。' if show_events else ''}")
-    ai_panel("m1", _ctx_m1)
 
 # ---------- M2 運量結構 ----------
 with tab2:
@@ -119,13 +94,6 @@ with tab2:
                "文湖線人次佔比約 9.5%，其**收入佔比高於人次佔比**（每人次票價較高），"
                "但總量仍遠小於高運量。"
                "※ 切換『營收』時 2005–2007 為空白：開放資料該三年未提供分車種收入。")
-    def _ctx_m2():
-        latest = share.iloc[-1]
-        unit = "%" if as_pct else "（原始量）"
-        return (f"分析：中運量(文湖線) vs 高運量的{metric2}結構，年範圍 {yr2[0]}–{yr2[1]}。"
-                f"最新年份 {int(latest['西元年'])}：中運量 {latest['中運量']:,.1f}{unit}、"
-                f"高運量 {latest['高運量']:,.1f}{unit}。")
-    ai_panel("m2", _ctx_m2)
 
 # ---------- M3 季節與崩跌 ----------
 with tab3:
@@ -141,17 +109,6 @@ with tab3:
     yoy = an.annual_yoy(overview, "人次", exclude_partial=True)
     st.plotly_chart(charts.annual_yoy_chart(yoy, "人次"), width="stretch")
     st.caption("年增率已排除不完整年（2026）。可見 SARS（2003）與 COVID（2020–2021）兩波崩跌。")
-    def _ctx_m3():
-        peak = seas.loc[seas["季節指數"].idxmax()]
-        trough = seas.loc[seas["季節指數"].idxmin()]
-        worst = yoy.dropna(subset=["年增率"]).nsmallest(2, "年增率")
-        worst_txt = "、".join(f"{int(r['西元年'])}年 {r['年增率']:.1f}%"
-                              for _, r in worst.iterrows())
-        return (f"分析：淡旺季（依{smetric}，年範圍 {yr3[0]}–{yr3[1]}）與年度崩跌。"
-                f"旺季高峰 {int(peak['月'])}月（季節指數 {peak['季節指數']:.0f}）、"
-                f"淡季低谷 {int(trough['月'])}月（{trough['季節指數']:.0f}）。"
-                f"年增率最大跌幅：{worst_txt}。")
-    ai_panel("m3", _ctx_m3)
 
 # ---------- M4 站點排行 ----------
 with tab4:
@@ -174,16 +131,6 @@ with tab4:
                                min_volume=1_000_000, top_n=10)
     st.plotly_chart(charts.growth_chart(growth, f"{yr4}"), width="stretch")
     st.caption("成長最快的站（前一年進站量 ≥ 100 萬，排除新開站的暴增雜訊）。")
-    def _ctx_m4():
-        top = "、".join(f"{r['站名']} {int(r[basis]):,}"
-                        for _, r in rank.head(3).iterrows())
-        fast = growth.iloc[0] if len(growth) else None
-        fast_txt = (f"成長最快站：{fast['站名']}（{fast['增減率']:.1f}%）。"
-                    if fast is not None else "")
-        return (f"分析：{yr4} 年站點{basis}人流排行"
-                f"（{'已合併同站閘門' if merge else '未合併閘門'}）。"
-                f"前三名：{top}。{fast_txt}")
-    ai_panel("m4", _ctx_m4)
 
 # ---------- M5 通勤潮汐 ----------
 with tab5:
@@ -204,12 +151,3 @@ with tab5:
     cc2.dataframe(tidal.tail(5)[["站名", "進出比", "類型"]].iloc[::-1], hide_index=True)
     st.caption("進出比＝進站÷出站。>1 偏住宅型（居民進站通勤）、<1 偏商業/轉乘型。"
                "轉乘站建議開啟合併以免比值失真。")
-    def _ctx_m5():
-        res = "、".join(f"{r['站名']}（進出比 {r['進出比']:.2f}）"
-                        for _, r in tidal.head(3).iterrows())
-        com = "、".join(f"{r['站名']}（{r['進出比']:.2f}）"
-                        for _, r in tidal.tail(3).iloc[::-1].iterrows())
-        return (f"分析：{yr5} 年站點通勤潮汐（進出比＝進站÷出站，"
-                f"{'已合併閘門' if merge5 else '未合併閘門'}，最少進站 {minv:,}）。"
-                f"最偏住宅型：{res}。最偏商業/轉乘型：{com}。")
-    ai_panel("m5", _ctx_m5)
