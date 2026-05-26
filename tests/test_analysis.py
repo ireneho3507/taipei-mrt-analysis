@@ -87,10 +87,26 @@ def test_station_growth(stations):
     assert g["增減率"].is_monotonic_decreasing
 
 
-# ---------- M5 通勤潮汐 ----------
-def test_commuter_tidal(stations):
-    t = an.commuter_tidal(stations, 2025, merge_gates=True, min_volume=1_000_000)
-    assert (t["進出比"] > 0).all()
-    assert set(t["類型"].dropna().unique()) <= {"商業/轉乘型", "均衡型", "住宅型"}
+# ---------- M5 通勤潮汐（資料驅動分群） ----------
+def test_commuter_clusters(stations):
+    c = an.commuter_clusters(stations, 2025, merge_gates=True,
+                             min_volume=1_000_000, k=3)
+    assert (c["進出比"] > 0).all()
+    # k=3 三群皆存在
+    assert set(c["群編號"].unique()) == {0, 1, 2}
+    assert set(c["類型"].unique()) <= {"商業/轉乘傾向", "均衡型", "住宅傾向"}
+    # 群編號依質心進出比升冪（0=最商業、2=最住宅）
+    means = c.groupby("群編號")["進出比"].mean()
+    assert means.is_monotonic_increasing
     # 進出比排序遞減
-    assert t["進出比"].is_monotonic_decreasing
+    assert c["進出比"].is_monotonic_decreasing
+
+
+def test_commuter_clusters_reproducible(stations):
+    """固定 random_state 應可重現；k 過大應報錯。"""
+    a = an.commuter_clusters(stations, 2025, min_volume=1_000_000, k=3)
+    b = an.commuter_clusters(stations, 2025, min_volume=1_000_000, k=3)
+    assert list(a["站名"]) == list(b["站名"])
+    assert list(a["群編號"]) == list(b["群編號"])
+    with pytest.raises(ValueError):
+        an.commuter_clusters(stations, 2025, min_volume=5_000_000, k=99)

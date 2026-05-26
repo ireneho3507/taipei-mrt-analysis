@@ -132,22 +132,35 @@ with tab4:
     st.plotly_chart(charts.growth_chart(growth, f"{yr4}"), width="stretch")
     st.caption("成長最快的站（前一年進站量 ≥ 100 萬，排除新開站的暴增雜訊）。")
 
-# ---------- M5 通勤潮汐 ----------
+# ---------- M5 通勤潮汐（資料驅動分群） ----------
 with tab5:
-    st.subheader("站點通勤潮汐：住宅型 vs 商業型")
-    c1, c2, c3 = st.columns(3)
+    st.subheader("站點通勤潮汐：資料驅動分群（k-means）")
+    c1, c2, c3, c4 = st.columns(4)
     yr5 = c1.slider("年份", *ST_YEARS, value=ST_YEARS[1], key="m5_yr")
     merge5 = c2.checkbox("合併同站不同閘門", value=True, key="m5_merge")
     minv = c3.select_slider("最少進站人次（過濾小站）",
                             options=[0, 500_000, 1_000_000, 3_000_000, 5_000_000],
                             value=1_000_000, key="m5_minv")
-    tidal = an.commuter_tidal(stations, yr5, merge_gates=merge5, min_volume=minv)
-    st.plotly_chart(charts.tidal_chart(tidal, f"{yr5}"), width="stretch")
+    k5 = c4.select_slider("分群數 k", options=[2, 3, 4], value=3, key="m5_k")
+    clusters = an.commuter_clusters(stations, yr5, merge_gates=merge5,
+                                    min_volume=minv, k=k5)
+    st.plotly_chart(charts.cluster_chart(clusters, f"{yr5}"), width="stretch")
+
+    # 各群輪廓（站數、平均進出比、平均規模），依群編號 0→k-1（商業→住宅）排列
+    prof = (clusters.groupby(["群編號", "類型"], observed=True)
+            .agg(站數=("站名", "size"), 平均進出比=("進出比", "mean"),
+                 平均進站=("進站", "mean")).reset_index().sort_values("群編號"))
+    st.markdown("**各群輪廓**")
+    st.dataframe(prof[["類型", "站數", "平均進出比", "平均進站"]].style.format(
+        {"平均進出比": "{:.3f}", "平均進站": "{:,.0f}"}), hide_index=True)
 
     cc1, cc2 = st.columns(2)
     cc1.markdown("**最偏住宅型（進＞出）**")
-    cc1.dataframe(tidal.head(5)[["站名", "進出比", "類型"]], hide_index=True)
+    cc1.dataframe(clusters.head(5)[["站名", "進出比", "類型"]], hide_index=True)
     cc2.markdown("**最偏商業/轉乘型（出＞進）**")
-    cc2.dataframe(tidal.tail(5)[["站名", "進出比", "類型"]].iloc[::-1], hide_index=True)
-    st.caption("進出比＝進站÷出站。>1 偏住宅型（居民進站通勤）、<1 偏商業/轉乘型。"
+    cc2.dataframe(clusters.tail(5)[["站名", "進出比", "類型"]].iloc[::-1], hide_index=True)
+    st.caption("以 k-means 對『進出比』做資料驅動分群，群依質心進出比命名"
+               "——**分群斷點由資料決定，取代原本人為的 0.95/1.05 門檻**。"
+               "進出比＝進站÷出站，>1 偏住宅（居民進站通勤）、<1 偏商業/轉乘。"
+               "（散點 X 軸為進站規模、圓點大小為進出合計，僅供視覺參考，不參與分群。）"
                "轉乘站建議開啟合併以免比值失真。")

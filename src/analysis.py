@@ -10,7 +10,9 @@
 """
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
+from sklearn.cluster import KMeans
 
 from . import data_loader as dl
 
@@ -164,21 +166,56 @@ def station_growth(stations: pd.DataFrame, year, basis: str = "進站",
     return m.head(top_n) if top_n else m
 
 
-# ---------- M5 通勤潮汐 ----------
-def commuter_tidal(stations: pd.DataFrame, year, merge_gates: bool = True,
-                   min_volume: int = 0) -> pd.DataFrame:
-    """進出站不平衡 → 住宅型 vs 商業型分類。
+# ---------- M5 通勤潮汐（資料驅動分群） ----------
+# 各 k 對應的群標籤，依「質心進出比」升冪排列（低=淨流入偏商業、高=淨流出偏住宅）
+_CLUSTER_LABELS = {
+    2: ["商業/轉乘傾向", "住宅傾向"],
+    3: ["商業/轉乘傾向", "均衡型", "住宅傾向"],
+    4: ["商業/轉乘傾向", "均衡偏商", "均衡偏住", "住宅傾向"],
+}
 
-    進出比 = 進站 ÷ 出站。>1.05 住宅型(淨流出)、<0.95 商業/轉乘型(淨流入)、其餘均衡。
-    min_volume：以進站量過濾小站雜訊。
+
+def commuter_clusters(stations: pd.DataFrame, year, merge_gates: bool = True,
+                      min_volume: int = 0, k: int = 3,
+                      random_state: int = 42) -> pd.DataFrame:
+    """以 k-means 對站點進出比做資料驅動分群（取代舊版固定門檻 0.95/1.05）。
+
+    特徵：進出比（站點通勤潮汐方向）。以 k-means 在此單一維度找出自然
+    斷點，分群後依各群「平均進出比」升冪重新編號(群編號 0=最偏商業/轉乘)
+    並命名——群的邊界由資料決定，而非人為設定門檻。min_volume 以進站量
+    過濾小站雜訊。（規模 log10(進站) 僅用於散點視覺，不參與分群。）
+
+    回傳欄位：站名、進站、出站、進出比、進出合計、群編號、類型。
     """
+    if k < 2:
+        raise ValueError("分群數 k 至少為 2")
+
     df = _select_year(stations, year)
     name_col = "基底站名" if merge_gates else dl.COL_STATION
     g = df.groupby(name_col).agg(進站=(dl.COL_ENTRY, "sum"),
                                  出站=(dl.COL_EXIT, "sum")).reset_index()
     g = g.rename(columns={name_col: "站名"})
-    g = g[(g["進站"] >= min_volume) & (g["出站"] > 0)]
+    g = g[(g["進站"] >= min_volume) & (g["進站"] > 0) & (g["出站"] > 0)]
     g["進出比"] = g["進站"] / g["出站"]
-    g["類型"] = pd.cut(g["進出比"], bins=[0, 0.95, 1.05, float("inf")],
-                       labels=["商業/轉乘型", "均衡型", "住宅型"])
+    g["進出合計"] = g["進站"] + g["出站"]
+
+    if len(g) < k:
+        raise ValueError(f"可分群站點數({len(g)})少於分群數 k({k})")
+
+    # 單一特徵：進出比（潮汐方向）。z-score 後在此維度找資料自然斷點。
+    feats = g["進出比"].to_numpy().reshape(-1, 1)
+    feats_z = (feats - feats.mean()) / feats.std()
+
+    km = KMeans(n_clusters=k, random_state=random_state, n_init=10)
+    raw = km.fit_predict(feats_z)
+    g = g.assign(_raw=raw)
+
+    # 依群平均進出比升冪重新編號，使 0=最偏商業、k-1=最偏住宅
+    order = g.groupby("_raw")["進出比"].mean().sort_values().index.tolist()
+    rank = {raw_id: i for i, raw_id in enumerate(order)}
+    g["群編號"] = g["_raw"].map(rank)
+    labels = _CLUSTER_LABELS.get(k, [f"群{i + 1}" for i in range(k)])
+    g["類型"] = g["群編號"].map(lambda i: labels[i])
+    g = g.drop(columns="_raw")
+
     return g.sort_values("進出比", ascending=False).reset_index(drop=True)

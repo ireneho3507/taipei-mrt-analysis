@@ -119,14 +119,25 @@ def growth_chart(df: pd.DataFrame, year_label: str) -> go.Figure:
     return fig
 
 
-def tidal_chart(df: pd.DataFrame, year_label: str) -> go.Figure:
-    """M5 通勤潮汐散點：進站量 × 進出比，依類型上色。"""
+# 分群類型 → 顏色（紅=偏商業/轉乘、綠=偏住宅、灰/藍橘=中間）
+_CLUSTER_COLORS = {
+    "住宅傾向": "#1a9850",
+    "均衡偏住": "#74add1",
+    "均衡型": "#999999",
+    "均衡偏商": "#fdae61",
+    "商業/轉乘傾向": "#d73027",
+}
+
+
+def cluster_chart(df: pd.DataFrame, year_label: str) -> go.Figure:
+    """M5 通勤潮汐散點：進站量 × 進出比，依 k-means 資料驅動分群上色。"""
     fig = px.scatter(df, x="進站", y="進出比", color="類型",
-                     hover_name="站名", size="進站", size_max=28,
-                     color_discrete_map={"住宅型": "#1a9850", "均衡型": "#999999",
-                                         "商業/轉乘型": "#d73027"},
-                     title=f"{year_label} 站點通勤潮汐（進出比＝進站÷出站）")
+                     hover_name="站名", size="進出合計", size_max=28,
+                     color_discrete_map=_CLUSTER_COLORS,
+                     title=f"{year_label} 站點通勤潮汐 k-means 分群（進出比＝進站÷出站）")
     fig.add_hline(y=1.0, line_dash="dot", line_color="gray",
                   annotation_text="進出平衡", annotation_position="bottom right")
-    fig.update_layout(xaxis_title="進站人次（人次）", yaxis_title="進出比（>1 住宅型，<1 商業型）")
+    fig.update_layout(xaxis_title="進站人次（人次，圓點大小＝進出合計）",
+                      yaxis_title="進出比（>1 偏住宅，<1 偏商業）",
+                      legend_title="資料驅動分群")
     return fig
