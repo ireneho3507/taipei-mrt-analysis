@@ -59,6 +59,12 @@ def _accumulate(path: Path) -> tuple[pd.DataFrame, int]:
         dtype={"時段": "int16", "進站": "string", "出站": "string", "人次": "int32"},
         chunksize=CHUNK,
     ):
+        # 正規化站名：2025 檔對部分站加了路線字母前綴（如 O景安、G大坪林、
+        # BL板橋、Y板橋），同一站會被拆成兩個名字、使某方向計數歸零。
+        # 去掉開頭的拉丁字母前綴即可把同站合併（中文站名不會以拉丁字母開頭）。
+        for col in ("進站", "出站"):
+            chunk[col] = chunk[col].str.replace(r"^[A-Za-z]+", "", regex=True)
+
         dates = pd.to_datetime(chunk["日期"])
         is_weekday = dates.dt.weekday < 5
         chunk = chunk[is_weekday]

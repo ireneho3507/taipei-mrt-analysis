@@ -81,14 +81,16 @@ def seasonal_chart(df: pd.DataFrame, metric: str) -> go.Figure:
 
 def annual_yoy_chart(df: pd.DataFrame, metric: str) -> go.Figure:
     """M3 年增率長條，標註 SARS / COVID。"""
-    fig = px.bar(df.dropna(subset=["年增率"]), x="西元年", y="年增率",
+    d = df.dropna(subset=["年增率"])
+    fig = px.bar(d, x="西元年", y="年增率",
                  title=f"年度{metric}增減率（已排除不完整年）")
-    fig.update_traces(marker_color=df["年增率"].apply(
+    # 用與 px.bar 相同的 d（已去 NaN）算顏色，避免與長條錯位
+    fig.update_traces(marker_color=d["年增率"].apply(
         lambda v: "#d73027" if v < 0 else "#1a9850"))
     fig.add_hline(y=0, line_color="gray")
     notes = {2003: "SARS", 2020: "COVID", 2021: "三級警戒"}
     for yr, label in notes.items():
-        row = df[df["西元年"] == yr]
+        row = d[d["西元年"] == yr]
         if not row.empty and pd.notna(row["年增率"].iloc[0]):
             fig.add_annotation(x=yr, y=row["年增率"].iloc[0], text=label,
                                showarrow=True, arrowhead=2, ax=0, ay=-30,
