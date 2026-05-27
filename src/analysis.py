@@ -6,13 +6,11 @@
   M2 運量結構（中/高）    line_type_share
   M3 季節型態             seasonal_pattern
   M4 站點排行 / 成長       station_ranking, station_growth
-  M5 通勤潮汐             commuter_tidal
+  M5 通勤潮汐             commuter_tidal, tidal_compare
 """
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
-from sklearn.cluster import KMeans
 
 from . import data_loader as dl
 
@@ -166,56 +164,44 @@ def station_growth(stations: pd.DataFrame, year, basis: str = "進站",
     return m.head(top_n) if top_n else m
 
 
-# ---------- M5 通勤潮汐（資料驅動分群） ----------
-# 各 k 對應的群標籤，依「質心進出比」升冪排列（低=淨流入偏商業、高=淨流出偏住宅）
-_CLUSTER_LABELS = {
-    2: ["商業/轉乘傾向", "住宅傾向"],
-    3: ["商業/轉乘傾向", "均衡型", "住宅傾向"],
-    4: ["商業/轉乘傾向", "均衡偏商", "均衡偏住", "住宅傾向"],
-}
+# ---------- M5 通勤潮汐（OD 分時方向流） ----------
+def _tidency(tidal_index: float) -> str:
+    """依潮汐指數正負給傾向標籤。0 是有意義的樞紐（早晚出發佔比相等），非人為門檻。"""
+    return "住宅傾向" if tidal_index > 0 else "商業/轉乘傾向"
 
 
-def commuter_clusters(stations: pd.DataFrame, year, merge_gates: bool = True,
-                      min_volume: int = 0, k: int = 3,
-                      random_state: int = 42) -> pd.DataFrame:
-    """以 k-means 對站點進出比做資料驅動分群（取代舊版固定門檻 0.95/1.05）。
+def commuter_tidal(tidal: pd.DataFrame, year: int, min_volume: int = 0,
+                   top_n: int | None = None) -> pd.DataFrame:
+    """單一年度各站的通勤潮汐（來自每日分時 OD）。
 
-    特徵：進出比（站點通勤潮汐方向）。以 k-means 在此單一維度找出自然
-    斷點，分群後依各群「平均進出比」升冪重新編號(群編號 0=最偏商業/轉乘)
-    並命名——群的邊界由資料決定，而非人為設定門檻。min_volume 以進站量
-    過濾小站雜訊。（規模 log10(進站) 僅用於散點視覺，不參與分群。）
+    潮汐指數 = 早晨出發佔比 − 傍晚出發佔比。早高峰(07-09)以「出發」為主、
+    晚高峰(17-19)以「抵達」為主者為住宅傾向(指數>0)；反之為商業/轉乘傾向。
+    此為分時方向的實測差，不會被「同站早晚來回」抵消（早晚為各自的時間窗）。
 
-    回傳欄位：站名、進站、出站、進出比、進出合計、群編號、類型。
+    min_volume 以工作日均運量過濾小站雜訊；top_n 取絕對排序前 N。
+    回傳依潮汐指數遞減排序，附「傾向」欄。
     """
-    if k < 2:
-        raise ValueError("分群數 k 至少為 2")
+    df = tidal[tidal["西元年"] == year].copy()
+    df = df[df["工作日均運量"] >= min_volume]
+    if df.empty:
+        raise ValueError(f"{year} 年無符合條件（min_volume={min_volume}）的站點")
+    df["傾向"] = df["潮汐指數"].map(_tidency)
+    df = df.sort_values("潮汐指數", ascending=False).reset_index(drop=True)
+    return df.head(top_n) if top_n else df
 
-    df = _select_year(stations, year)
-    name_col = "基底站名" if merge_gates else dl.COL_STATION
-    g = df.groupby(name_col).agg(進站=(dl.COL_ENTRY, "sum"),
-                                 出站=(dl.COL_EXIT, "sum")).reset_index()
-    g = g.rename(columns={name_col: "站名"})
-    g = g[(g["進站"] >= min_volume) & (g["進站"] > 0) & (g["出站"] > 0)]
-    g["進出比"] = g["進站"] / g["出站"]
-    g["進出合計"] = g["進站"] + g["出站"]
 
-    if len(g) < k:
-        raise ValueError(f"可分群站點數({len(g)})少於分群數 k({k})")
+def tidal_compare(tidal: pd.DataFrame, year_a: int, year_b: int,
+                  min_volume: int = 0) -> pd.DataFrame:
+    """兩年度潮汐指數對照（疫情前 vs 後），僅取兩年皆有的站。
 
-    # 單一特徵：進出比（潮汐方向）。z-score 後在此維度找資料自然斷點。
-    feats = g["進出比"].to_numpy().reshape(-1, 1)
-    feats_z = (feats - feats.mean()) / feats.std()
-
-    km = KMeans(n_clusters=k, random_state=random_state, n_init=10)
-    raw = km.fit_predict(feats_z)
-    g = g.assign(_raw=raw)
-
-    # 依群平均進出比升冪重新編號，使 0=最偏商業、k-1=最偏住宅
-    order = g.groupby("_raw")["進出比"].mean().sort_values().index.tolist()
-    rank = {raw_id: i for i, raw_id in enumerate(order)}
-    g["群編號"] = g["_raw"].map(rank)
-    labels = _CLUSTER_LABELS.get(k, [f"群{i + 1}" for i in range(k)])
-    g["類型"] = g["群編號"].map(lambda i: labels[i])
-    g = g.drop(columns="_raw")
-
-    return g.sort_values("進出比", ascending=False).reset_index(drop=True)
+    回傳欄位：站名、潮汐指數_{a}、潮汐指數_{b}、變化(=b−a)、
+              工作日均運量_{b}、傾向_{b}。依年 b 的潮汐指數遞減排序。
+    """
+    a = commuter_tidal(tidal, year_a, min_volume)[["站名", "潮汐指數"]]
+    b = commuter_tidal(tidal, year_b, min_volume)[
+        ["站名", "潮汐指數", "工作日均運量", "傾向"]]
+    m = a.merge(b, on="站名", suffixes=(f"_{year_a}", f"_{year_b}"))
+    m = m.rename(columns={"工作日均運量": f"工作日均運量_{year_b}",
+                          "傾向": f"傾向_{year_b}"})
+    m["變化"] = m[f"潮汐指數_{year_b}"] - m[f"潮汐指數_{year_a}"]
+    return m.sort_values(f"潮汐指數_{year_b}", ascending=False).reset_index(drop=True)

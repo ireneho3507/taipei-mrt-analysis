@@ -2,7 +2,8 @@
 """臺北捷運運量分析 — Streamlit 互動網站。
 
 五個分析分頁（M1 趨勢 / M2 運量結構 / M3 季節與崩跌 / M4 站點排行 / M5 通勤潮汐）。
-資料來源：data.gov.tw → 臺北大眾捷運公司。
+M5 採每日分時 OD 流量（離線聚合的 2019-11、2025-11 代表月）。
+資料來源：data.gov.tw / data.taipei → 臺北大眾捷運公司。
 """
 import streamlit as st
 
@@ -24,6 +25,11 @@ def get_stations():
 
 
 @st.cache_data
+def get_tidal():
+    return dl.load_tidal()
+
+
+@st.cache_data
 def get_raw_csv(filename: str) -> bytes:
     """讀取 data/ 原始 CSV 位元組（保留 UTF-8-BOM 編碼）供下載。"""
     return (dl.DATA_DIR / filename).read_bytes()
@@ -31,9 +37,11 @@ def get_raw_csv(filename: str) -> bytes:
 
 overview = get_overview()
 stations = get_stations()
+tidal = get_tidal()
 
 OV_YEARS = (int(overview["西元年"].min()), int(overview["西元年"].max()))
 ST_YEARS = (int(stations["西元年"].min()), int(stations["西元年"].max()))
+TIDAL_YEARS = sorted(tidal["西元年"].unique())  # 代表月：疫情前 2019、近期 2025
 
 
 st.title("🚇 臺北捷運運量分析")
@@ -132,35 +140,44 @@ with tab4:
     st.plotly_chart(charts.growth_chart(growth, f"{yr4}"), width="stretch")
     st.caption("成長最快的站（前一年進站量 ≥ 100 萬，排除新開站的暴增雜訊）。")
 
-# ---------- M5 通勤潮汐（資料驅動分群） ----------
+# ---------- M5 通勤潮汐（OD 分時方向流） ----------
 with tab5:
-    st.subheader("站點通勤潮汐：資料驅動分群（k-means）")
-    c1, c2, c3, c4 = st.columns(4)
-    yr5 = c1.slider("年份", *ST_YEARS, value=ST_YEARS[1], key="m5_yr")
-    merge5 = c2.checkbox("合併同站不同閘門", value=True, key="m5_merge")
-    minv = c3.select_slider("最少進站人次（過濾小站）",
-                            options=[0, 500_000, 1_000_000, 3_000_000, 5_000_000],
-                            value=1_000_000, key="m5_minv")
-    k5 = c4.select_slider("分群數 k", options=[2, 3, 4], value=3, key="m5_k")
-    clusters = an.commuter_clusters(stations, yr5, merge_gates=merge5,
-                                    min_volume=minv, k=k5)
-    st.plotly_chart(charts.cluster_chart(clusters, f"{yr5}"), width="stretch")
+    st.subheader("站點通勤潮汐：早晚高峰的方向流（每日分時 OD）")
+    c1, c2 = st.columns(2)
+    yr5 = c1.radio("代表月份", TIDAL_YEARS, horizontal=True,
+                   format_func=lambda y: f"{y} 年 11 月"
+                   + ("（疫情前）" if y == 2019 else "（近期）"), key="m5_yr")
+    minv = c2.select_slider(
+        "最少工作日均運量（過濾小站雜訊）",
+        options=[0, 2_000, 5_000, 10_000, 20_000], value=5_000, key="m5_minv")
 
-    # 各群輪廓（站數、平均進出比、平均規模），依群編號 0→k-1（商業→住宅）排列
-    prof = (clusters.groupby(["群編號", "類型"], observed=True)
-            .agg(站數=("站名", "size"), 平均進出比=("進出比", "mean"),
-                 平均進站=("進站", "mean")).reset_index().sort_values("群編號"))
-    st.markdown("**各群輪廓**")
-    st.dataframe(prof[["類型", "站數", "平均進出比", "平均進站"]].style.format(
-        {"平均進出比": "{:.3f}", "平均進站": "{:,.0f}"}), hide_index=True)
+    td = an.commuter_tidal(tidal, yr5, min_volume=minv)
+    st.plotly_chart(charts.tidal_chart(td, f"{yr5} 年 11 月"), width="stretch")
 
     cc1, cc2 = st.columns(2)
-    cc1.markdown("**最偏住宅型（進＞出）**")
-    cc1.dataframe(clusters.head(5)[["站名", "進出比", "類型"]], hide_index=True)
-    cc2.markdown("**最偏商業/轉乘型（出＞進）**")
-    cc2.dataframe(clusters.tail(5)[["站名", "進出比", "類型"]].iloc[::-1], hide_index=True)
-    st.caption("以 k-means 對『進出比』做資料驅動分群，群依各群質心進出比命名"
-               "——**分群邊界由資料本身的群聚結構決定**。"
-               "進出比＝進站÷出站，>1 偏住宅（居民進站通勤）、<1 偏商業/轉乘。"
-               "（散點 X 軸為進站規模、圓點大小為進出合計，僅供視覺參考，不參與分群。）"
-               "轉乘站建議開啟合併以免比值失真。")
+    cc1.markdown("**最住宅傾向（早出發·晚回家）**")
+    cc1.dataframe(td.head(6)[["站名", "早晨出發佔比", "傍晚出發佔比", "潮汐指數"]]
+                  .style.format({"早晨出發佔比": "{:.0%}", "傍晚出發佔比": "{:.0%}",
+                                 "潮汐指數": "{:+.3f}"}), hide_index=True)
+    cc2.markdown("**最商業/轉乘傾向（早抵達·晚離開）**")
+    cc2.dataframe(td.tail(6).iloc[::-1][["站名", "早晨出發佔比", "傍晚出發佔比", "潮汐指數"]]
+                  .style.format({"早晨出發佔比": "{:.0%}", "傍晚出發佔比": "{:.0%}",
+                                 "潮汐指數": "{:+.3f}"}), hide_index=True)
+    st.caption(
+        "**潮汐指數 = 早高峰(07–09)出發佔比 − 晚高峰(17–19)出發佔比。** "
+        "住宅站早上大量「出發」、傍晚大量「抵達」回家（指數>0）；商業/轉乘站相反（<0）。"
+        "因為分早、晚兩個獨立時間窗看『方向』，**不會被同站早晚來回抵消**——"
+        "這是用站對站 OD 流量、而非年進出總量，才量得到的真實通勤潮汐。"
+        "僅計工作日（排除週末）。")
+
+    # 疫情前後對照（兩年皆有的站）
+    if len(TIDAL_YEARS) >= 2:
+        st.markdown("---")
+        st.markdown("##### 疫情前後對照：通勤型態回復了嗎？")
+        ya, yb = TIDAL_YEARS[0], TIDAL_YEARS[-1]
+        cmp = an.tidal_compare(tidal, ya, yb, min_volume=minv)
+        st.plotly_chart(charts.tidal_compare_chart(cmp, ya, yb), width="stretch")
+        st.caption(
+            f"點落在對角線 = 該站 {ya}↔{yb} 通勤型態不變（網絡形狀已回復）。"
+            f"住宅站(右上)與商業站(左下)兩群在 {yb} 依然分明，"
+            "顯示通勤潮汐的空間結構在疫情後大致回到原樣。")

@@ -18,6 +18,9 @@ import pandas as pd
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 OVERVIEW_FILE = "臺北市捷運客運概況按月別.csv"
 STATIONS_FILE = "臺北市捷運各站進出站人次_年別.csv"
+# M5 通勤潮汐用：由 scripts/od_aggregate.py 從每日分時 OD 原始檔離線聚合而成
+# （原始檔每月約 270MB、不進版控；此處只保留聚合後的小檔）。
+TIDAL_FILE = "od_tidal.csv"
 
 # 客運概況欄位常數
 COL_RIDERS_TOTAL = "客運人次/總計[人次]"
@@ -92,3 +95,15 @@ def load_stations(path: str | Path | None = None) -> pd.DataFrame:
     df["基底站名"] = df[COL_STATION].str.replace(_SUFFIX_RE, "", regex=True)
 
     return df.reset_index(drop=True)
+
+
+def load_tidal(path: str | Path | None = None) -> pd.DataFrame:
+    """載入離線聚合好的通勤潮汐資料（每站早/晚高峰的出發·抵達 + 潮汐指數）。
+
+    來源：每日分時各站 OD 流量（data.taipei），取 2019-11 與 2025-11 兩個
+    代表月，只計工作日，由 scripts/od_aggregate.py 聚合。
+    欄位：西元年、站名、早晨出發/抵達、傍晚出發/抵達、早晨出發佔比、
+          傍晚出發佔比、潮汐指數、工作日均運量、工作日數。
+    """
+    path = Path(path) if path else DATA_DIR / TIDAL_FILE
+    return pd.read_csv(path, encoding="utf-8-sig")

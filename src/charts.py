@@ -119,25 +119,58 @@ def growth_chart(df: pd.DataFrame, year_label: str) -> go.Figure:
     return fig
 
 
-# 分群類型 → 顏色（紅=偏商業/轉乘、綠=偏住宅、灰/藍橘=中間）
-_CLUSTER_COLORS = {
-    "住宅傾向": "#1a9850",
-    "均衡偏住": "#74add1",
-    "均衡型": "#999999",
-    "均衡偏商": "#fdae61",
-    "商業/轉乘傾向": "#d73027",
-}
+def tidal_chart(df: pd.DataFrame, year_label: str) -> go.Figure:
+    """M5 通勤潮汐散點：早晨出發佔比 × 傍晚出發佔比。
+
+    住宅站落在右下（早上多出發、傍晚多抵達）、商業/轉乘站落在左上；
+    對角線 y=x 為「早晚方向對稱」，點偏離對角線即代表潮汐反轉。
+    顏色為潮汐指數（綠=住宅、紅=商業）、圓點大小為工作日均運量。
+    """
+    fig = px.scatter(
+        df, x="早晨出發佔比", y="傍晚出發佔比", color="潮汐指數",
+        hover_name="站名", size="工作日均運量", size_max=30,
+        color_continuous_scale="RdYlGn", range_color=[-0.75, 0.75],
+        custom_data=["傾向", "工作日均運量"],
+        title=f"{year_label} 站點通勤潮汐（早高峰 vs 晚高峰 出發佔比）")
+    fig.update_traces(hovertemplate=(
+        "<b>%{hovertext}</b><br>早晨出發佔比 %{x:.0%}<br>傍晚出發佔比 %{y:.0%}"
+        "<br>傾向：%{customdata[0]}<br>工作日均運量 %{customdata[1]:,.0f}<extra></extra>"))
+    fig.add_shape(type="line", x0=0, y0=0, x1=1, y1=1,
+                  line=dict(color="gray", dash="dot"))
+    fig.add_annotation(x=0.83, y=0.2, text="↘ 住宅傾向<br>(早出發·晚抵達)",
+                       showarrow=False, font=dict(size=10, color="#1a9850"))
+    fig.add_annotation(x=0.2, y=0.83, text="商業/轉乘傾向 ↖<br>(早抵達·晚出發)",
+                       showarrow=False, font=dict(size=10, color="#d73027"))
+    fig.update_layout(xaxis_title="早高峰(07–09)出發佔比 = 出發 ÷ (出發+抵達)",
+                      yaxis_title="晚高峰(17–19)出發佔比",
+                      coloraxis_colorbar_title="潮汐指數")
+    fig.update_xaxes(tickformat=".0%", range=[0, 1])
+    fig.update_yaxes(tickformat=".0%", range=[0, 1])
+    return fig
 
 
-def cluster_chart(df: pd.DataFrame, year_label: str) -> go.Figure:
-    """M5 通勤潮汐散點：進站量 × 進出比，依 k-means 資料驅動分群上色。"""
-    fig = px.scatter(df, x="進站", y="進出比", color="類型",
-                     hover_name="站名", size="進出合計", size_max=28,
-                     color_discrete_map=_CLUSTER_COLORS,
-                     title=f"{year_label} 站點通勤潮汐 k-means 分群（進出比＝進站÷出站）")
-    fig.add_hline(y=1.0, line_dash="dot", line_color="gray",
-                  annotation_text="進出平衡", annotation_position="bottom right")
-    fig.update_layout(xaxis_title="進站人次（人次，圓點大小＝進出合計）",
-                      yaxis_title="進出比（>1 偏住宅，<1 偏商業）",
-                      legend_title="資料驅動分群")
+def tidal_compare_chart(df: pd.DataFrame, year_a: int, year_b: int) -> go.Figure:
+    """M5 疫情前後對照散點：x=year_a 潮汐指數、y=year_b 潮汐指數。
+
+    點落在對角線 y=x 代表該站通勤型態在兩年間維持不變（網絡形狀已回復）。
+    """
+    xa, yb = f"潮汐指數_{year_a}", f"潮汐指數_{year_b}"
+    lim = 0.85
+    fig = px.scatter(df, x=xa, y=yb, color="變化", hover_name="站名",
+                     custom_data=["變化"],
+                     color_continuous_scale="RdBu", range_color=[-0.2, 0.2],
+                     title=f"通勤潮汐：{year_a}（疫情前）vs {year_b} 對照")
+    fig.update_traces(hovertemplate=(
+        f"<b>%{{hovertext}}</b><br>{year_a} 潮汐指數 %{{x:.3f}}"
+        f"<br>{year_b} 潮汐指數 %{{y:.3f}}"
+        "<br>變化 %{customdata[0]:+.3f}<extra></extra>"))
+    fig.add_shape(type="line", x0=-lim, y0=-lim, x1=lim, y1=lim,
+                  line=dict(color="gray", dash="dot"))
+    fig.add_hline(y=0, line_color="rgba(150,150,150,0.5)")
+    fig.add_vline(x=0, line_color="rgba(150,150,150,0.5)")
+    fig.update_layout(xaxis_title=f"{year_a} 潮汐指數（>0 住宅、<0 商業）",
+                      yaxis_title=f"{year_b} 潮汐指數",
+                      coloraxis_colorbar_title=f"變化<br>({year_b}−{year_a})")
+    fig.update_xaxes(range=[-lim, lim])
+    fig.update_yaxes(range=[-lim, lim])
     return fig

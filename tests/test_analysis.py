@@ -16,6 +16,11 @@ def stations():
     return dl.load_stations()
 
 
+@pytest.fixture(scope="module")
+def tidal():
+    return dl.load_tidal()
+
+
 # ---------- M1 趨勢 ----------
 def test_monthly_trend_smoothing(overview):
     raw = an.monthly_trend(overview, "人次", "raw")
@@ -87,26 +92,42 @@ def test_station_growth(stations):
     assert g["增減率"].is_monotonic_decreasing
 
 
-# ---------- M5 通勤潮汐（資料驅動分群） ----------
-def test_commuter_clusters(stations):
-    c = an.commuter_clusters(stations, 2025, merge_gates=True,
-                             min_volume=1_000_000, k=3)
-    assert (c["進出比"] > 0).all()
-    # k=3 三群皆存在
-    assert set(c["群編號"].unique()) == {0, 1, 2}
-    assert set(c["類型"].unique()) <= {"商業/轉乘傾向", "均衡型", "住宅傾向"}
-    # 群編號依質心進出比升冪（0=最商業、2=最住宅）
-    means = c.groupby("群編號")["進出比"].mean()
-    assert means.is_monotonic_increasing
-    # 進出比排序遞減
-    assert c["進出比"].is_monotonic_decreasing
+# ---------- M5 通勤潮汐（OD 分時方向流） ----------
+def test_commuter_tidal_definition_and_order(tidal):
+    t = an.commuter_tidal(tidal, 2025, min_volume=5_000)
+    # 潮汐指數 = 早晨出發佔比 − 傍晚出發佔比
+    diff = t["早晨出發佔比"] - t["傍晚出發佔比"]
+    assert (diff - t["潮汐指數"]).abs().max() < 1e-9
+    # 依潮汐指數遞減
+    assert t["潮汐指數"].is_monotonic_decreasing
+    # 傾向標籤與指數正負一致（0 為樞紐）
+    assert (t.loc[t["潮汐指數"] > 0, "傾向"] == "住宅傾向").all()
+    assert (t.loc[t["潮汐指數"] < 0, "傾向"] == "商業/轉乘傾向").all()
+    # 最住宅端為正、最商業端為負
+    assert t.iloc[0]["潮汐指數"] > 0 and t.iloc[0]["傾向"] == "住宅傾向"
+    assert t.iloc[-1]["潮汐指數"] < 0 and t.iloc[-1]["傾向"] == "商業/轉乘傾向"
 
 
-def test_commuter_clusters_reproducible(stations):
-    """固定 random_state 應可重現；k 過大應報錯。"""
-    a = an.commuter_clusters(stations, 2025, min_volume=1_000_000, k=3)
-    b = an.commuter_clusters(stations, 2025, min_volume=1_000_000, k=3)
-    assert list(a["站名"]) == list(b["站名"])
-    assert list(a["群編號"]) == list(b["群編號"])
-    with pytest.raises(ValueError):
-        an.commuter_clusters(stations, 2025, min_volume=5_000_000, k=99)
+def test_commuter_tidal_known_stations(tidal):
+    """站名身分應與潮汐方向一致：蘆洲(住宅)為正、南港軟體園區(就業)為負。"""
+    t = an.commuter_tidal(tidal, 2025, min_volume=5_000).set_index("站名")
+    assert t.loc["蘆洲", "潮汐指數"] > 0.4          # 住宅型臥房城市
+    assert t.loc["南港軟體園區", "潮汐指數"] < -0.4   # 就業型園區
+
+
+def test_commuter_tidal_min_volume_filters(tidal):
+    big = an.commuter_tidal(tidal, 2025, min_volume=20_000)
+    assert (big["工作日均運量"] >= 20_000).all()
+    assert len(big) < len(an.commuter_tidal(tidal, 2025, min_volume=0))
+
+
+def test_tidal_compare(tidal):
+    m = an.tidal_compare(tidal, 2019, 2025, min_volume=5_000)
+    assert {"潮汐指數_2019", "潮汐指數_2025", "變化"} <= set(m.columns)
+    # 變化 = 後 − 前
+    assert (m["變化"] - (m["潮汐指數_2025"] - m["潮汐指數_2019"])).abs().max() < 1e-9
+    # 僅取兩年皆有的站（無缺值）
+    assert m["潮汐指數_2019"].notna().all() and m["潮汐指數_2025"].notna().all()
+    # 住宅站(蘆洲)兩年皆為正
+    luzhou = m.loc[m["站名"] == "蘆洲"].iloc[0]
+    assert luzhou["潮汐指數_2019"] > 0 and luzhou["潮汐指數_2025"] > 0

@@ -25,6 +25,9 @@ Thumbs.db
 *.html
 .playwright-mcp/
 
+# 巨量 OD 原始檔（每月約 270MB，不進版控；只保留 data/od_tidal.csv 聚合小檔）
+_od_raw/
+
 # 個人報告準備文件（不公開）
 docs/presentation_plan.md
 docs/demo_script.md
